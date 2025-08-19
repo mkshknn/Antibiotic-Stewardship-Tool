@@ -1,0 +1,77 @@
+function calculateDOTPerPatientPerIndication() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("AUDIT");
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift();
+
+  const serialIdx = headers.indexOf("Sno");
+  const indicationIdx = headers.indexOf("Indication");
+  const startIdx = headers.indexOf("Restricted Start Date");
+  const abxIdx = headers.indexOf("Restricted Abx");
+  const endIdx = headers.indexOf("Restricted Stop Date");
+
+  const patientGroups = {};
+
+  data.forEach(row => {
+    const serial = row[serialIdx];
+    const indication = row[indicationIdx];
+    const startRaw = row[startIdx];
+    const endRaw = row[endIdx];
+    const abxRaw = row[abxIdx];
+
+    if (!serial || !indication || !startRaw || !endRaw || !abxRaw) return;
+
+    const start = new Date(startRaw);
+    const end = new Date(endRaw);
+    if (isNaN(start) || isNaN(end)) return;
+
+    // Split multiple antibiotics if needed
+    const abxList = abxRaw.split(",").map(a => a.trim());
+
+    // Use Sno + Indication as unique key
+    const key = serial + "|" + indication;
+
+    if (!patientGroups[key]) patientGroups[key] = [];
+    patientGroups[key].push([start, end]);
+  });
+
+  const results = [["Sno", "Indication", "Unique DOT"]];
+
+  for (const key in patientGroups) {
+    const ranges = patientGroups[key];
+    ranges.sort((a,b) => a[0] - b);
+
+    const merged = [];
+    let [s, e] = ranges;
+
+    for (let i = 1; i < ranges.length; i++) {
+      const [cs, ce] = ranges[i];
+      if (cs <= e)
+        e = new Date(Math.max(e, ce));
+      else {
+        merged.push([s, e]);
+        [s, e] = [cs, ce];
+      }
+    }
+    merged.push([s, e]);
+
+    // FINAL TWEAKED CALCULATION (+1 for inclusive days)
+    const uniqueDOT = merged.reduce((sum, [s, e]) => {
+      const diff = Math.round((e - s)/(1000*3600*24)) + 1;
+      return sum + diff;
+    }, 0);
+
+    const [serial, indication] = key.split("|");
+    results.push([serial, indication, uniqueDOT]);
+  }
+
+  // Output to new sheet
+  const outSheetName = "Patient DOT Results";
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let outSheet = ss.getSheetByName(outSheetName);
+  if (!outSheet)
+    outSheet = ss.insertSheet(outSheetName);
+  else
+    outSheet.clear();
+
+  outSheet.getRange(1,1,results.length,results[0].length).setValues(results);
+}

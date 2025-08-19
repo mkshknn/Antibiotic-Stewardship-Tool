@@ -1,0 +1,66 @@
+function calculateIndicationLOS_perPatientAllRows() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("AUDIT");
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift();
+
+  const snoIdx = headers.indexOf("Sno");
+  const indicationIdx = headers.indexOf("Indication");
+  const losIdx = headers.indexOf("L.O.S");
+
+  const snoIndications = {}; // { Sno: Set of Indications }
+  const snoLOSsum = {};      // { Sno: total LOS summed across all their rows }
+
+  // First pass: build Sno -> total LOS and Sno -> indications sets
+  data.forEach(row => {
+    const sno = row[snoIdx];
+    const indicationRaw = row[indicationIdx];
+    const los = Number(row[losIdx]);
+
+    if (!sno || !indicationRaw || isNaN(los)) return;
+
+    // Sum LOS per Sno
+    if (!snoLOSsum[sno]) snoLOSsum[sno] = 0;
+    snoLOSsum[sno] += los;
+
+    // Record all indications per Sno
+    const indications = indicationRaw.split(',').map(s => s.trim());
+    if (!snoIndications[sno]) snoIndications[sno] = new Set();
+    indications.forEach(ind => {
+      if (ind) snoIndications[sno].add(ind);
+    });
+  });
+
+  // Build Indication -> list of SNOs mapping
+  const indicationSnoMap = {}; // { Indication: Set of SNOs }
+
+  for (const sno in snoIndications) {
+    snoIndications[sno].forEach(ind => {
+      if (!indicationSnoMap[ind]) {
+        indicationSnoMap[ind] = new Set();
+      }
+      indicationSnoMap[ind].add(sno);
+    });
+  }
+
+  // Calculate total LOS per indication (sum of all LOS rows of all SNOs linked to that indication)
+  const results = [["Indication", "Total LOS"]];
+
+  for (const ind in indicationSnoMap) {
+    let totalLOS = 0;
+    indicationSnoMap[ind].forEach(sno => {
+      totalLOS += snoLOSsum[sno];
+    });
+    results.push([ind, totalLOS]);
+  }
+
+  // Output results to a new sheet
+  const outSheetName = "Indication LOS Results";
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let outSheet = ss.getSheetByName(outSheetName);
+  if (!outSheet) {
+    outSheet = ss.insertSheet(outSheetName);
+  } else {
+    outSheet.clear();
+  }
+  outSheet.getRange(1, 1, results.length, results[0].length).setValues(results);
+}
